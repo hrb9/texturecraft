@@ -244,7 +244,7 @@ fn body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel, available_height: 
 
 /// The panel's name in capitals, which drags like a tab, then Undock and Close: whether each was clicked, and where a drag started
 fn title_row(ui: &mut Ui, tokens: &Tokens, panel: Panel) -> (bool, bool, Option<Rect>) {
-    let row = ui.horizontal(|ui| {
+    let row = craft_ui::direction::horizontal(ui, |ui| {
         ui.label(RichText::new(tr(panel.name()).to_uppercase()).strong().color(tokens.text_strong));
         ui.add_space((ui.available_width() - 2.0 * TITLE_BUTTON_SIZE - TITLE_BUTTON_GAP).max(0.0));
         let undock = icon_button(ui, ic::ARROW_SQUARE_OUT, tr("Undock"), false, TITLE_BUTTON_SIZE);
