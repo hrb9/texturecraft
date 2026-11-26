@@ -105,6 +105,8 @@ impl Script {
                     "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
                     "/usr/share/fonts/noto/NotoSansHebrew-Regular.ttf",
                     "/usr/share/fonts/google-noto/NotoSansHebrew-Regular.ttf",
+                    "/usr/share/fonts/google-noto-vf/NotoSansHebrew[wdth,wght].ttf",
+                    "/usr/share/fonts/truetype/noto/NotoSansHebrew[wdth,wght].ttf",
                     "/usr/local/share/fonts/noto/NotoSansHebrew-Regular.ttf",
                 ],
                 _ => &[],

@@ -238,7 +238,8 @@ fn body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel, available_height: 
 fn title_row(ui: &mut Ui, tokens: &Tokens, panel: Panel) -> (bool, bool, Option<Rect>) {
     let rtl = ui.style().right_to_left;
     let layout = if rtl { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
-    let row = ui.with_layout(layout, |ui| {
+    let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y.max(TITLE_BUTTON_SIZE));
+    let row = ui.allocate_ui_with_layout(size, layout, |ui| {
         ui.label(RichText::new(tr(panel.name()).to_uppercase()).strong().color(tokens.text_strong));
         ui.add_space((ui.available_width() - 2.0 * TITLE_BUTTON_SIZE - TITLE_BUTTON_GAP).max(0.0));
         let undock = icon_button(ui, ic::ARROW_SQUARE_OUT, tr("Undock"), false, TITLE_BUTTON_SIZE);
