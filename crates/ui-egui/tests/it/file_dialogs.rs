@@ -13,7 +13,10 @@ use texturecraft_ui_egui::state::Unsaved;
 fn harness(modified: bool) -> Harness<'static, TextureCraftApp> {
     let mut session = texturecraft_engine::sample_session(256, 64).unwrap();
     session.modified = modified;
-    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 960.0)).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1600.0, 960.0))
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|cc| TextureCraftApp::new(cc, session));
     h.run_steps(4);
     h
 }
@@ -73,6 +76,30 @@ fn a_canceled_dialog_changes_nothing() {
     assert_eq!(h.state().session.doc.project.name, name);
     assert!(h.state().toasts.is_empty());
     assert_eq!(h.state().file_dialogs.pending(), 0);
+}
+
+#[test]
+fn the_sample_picker_asks_to_save_only_after_a_path_is_chosen() {
+    let samples = super::temp_dir::TempDir::new("sample-picker");
+    let mut h = harness(true);
+    let samples_folder = samples.join("Samples");
+    std::fs::create_dir(&samples_folder).unwrap();
+    std::fs::write(samples_folder.join("Material Ball.tcraft"), b"stand-in").unwrap();
+    h.state_mut().samples_folder = samples_folder;
+    answer(&mut h, |_| Answer::Cancelled);
+    invoke(&mut h, "project.sample");
+    assert_eq!(h.state().file_dialogs.pending(), 1);
+    h.run_steps(3);
+    assert!(h.state().ui.windows.unsaved.is_none());
+    assert!(h.state().session.modified);
+
+    let path = PathBuf::from("chosen.tcraft");
+    let selected = path.clone();
+    answer(&mut h, move |_| Answer::Paths(vec![selected.clone()]));
+    invoke(&mut h, "project.sample");
+    h.run_steps(3);
+    assert_eq!(h.state().ui.windows.unsaved, Some(Unsaved::Open(path.display().to_string())));
+    assert!(h.state().session.modified);
 }
 
 #[test]

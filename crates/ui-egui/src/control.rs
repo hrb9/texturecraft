@@ -92,6 +92,7 @@ fn refresh_draft_preferences(draft: &mut Prefs, previous: &Prefs, current: &Pref
     refresh_fields!(
         ui_scale,
         autosave_minutes,
+        recent_projects_limit,
         language,
         viewport_texture,
         brightness,
@@ -109,6 +110,7 @@ fn refresh_draft_preferences(draft: &mut Prefs, previous: &Prefs, current: &Pref
         wheel_inverse,
         gpu_raytracing,
         libraries,
+        background,
     );
 }
 
@@ -226,6 +228,7 @@ pub fn handle(app: &mut TextureCraftApp, ctx: &egui::Context, method: &str, para
                 .map(|item| json!({
                     "menu": item.menu, "submenu": item.sub, "label": item.label, "id": item.id, "shortcut": crate::keymap::shortcut_of(&app.ui.keymap, item.id),
                     "implemented": crate::menus::implemented(item.id), "enabled": crate::menus::enabled(app, item.id),
+                    "checked": crate::menus::checked(app, item.id),
                 }))
                 .collect::<Vec<_>>()
         )),
@@ -282,6 +285,7 @@ pub fn handle(app: &mut TextureCraftApp, ctx: &egui::Context, method: &str, para
                         refresh_draft_preferences(&mut draft.prefs, &app.ui.prefs, &ui.prefs);
                     }
 
+                    ui.trim_recent();
                     app.ui = ui;
                     app.reschedule_autosave_if_changed(previous_autosave_minutes);
                     app.ui.prefs.apply_resource_limits();
@@ -326,5 +330,26 @@ mod tests {
         assert_eq!((decoded.width(), decoded.height()), (2, 1));
         assert_eq!(decoded.to_rgba8(), vec![255, 0, 0, 255, 0, 255, 0, 255]);
         assert!(encode_png(2, 1, vec![0; 3]).is_none());
+    }
+
+    #[test]
+    fn a_live_background_change_reaches_an_open_settings_draft() {
+        let previous = Prefs::default();
+        let mut current = previous.clone();
+        current.background = [[0.5, 0.0, 0.0], [0.0, 0.0, 0.5]];
+
+        let mut draft = previous.clone();
+        draft.language = "de".into();
+        refresh_draft_preferences(&mut draft, &previous, &current);
+        assert_eq!(draft.background, current.background, "the control change shows in the open window");
+        assert_eq!(draft.language, "de", "the window's own edit stays");
+
+        // A background edited in the window and not by the control stays as edited
+        let mut edited = previous.clone();
+        edited.background[0] = [0.1, 0.2, 0.3];
+        let mut language_only = previous.clone();
+        language_only.language = "fr".into();
+        refresh_draft_preferences(&mut edited, &previous, &language_only);
+        assert_eq!(edited.background[0], [0.1, 0.2, 0.3]);
     }
 }

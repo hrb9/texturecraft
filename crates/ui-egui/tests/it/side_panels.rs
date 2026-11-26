@@ -24,7 +24,10 @@ const TOOLTIP_FRAMES: usize = 30;
 
 fn app() -> Harness<'static, TextureCraftApp> {
     let session = texturecraft_engine::sample_session(256, 64).unwrap();
-    let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_eframe(|cc| TextureCraftApp::new(cc, session));
+    let mut harness = Harness::builder()
+        .with_size(WINDOW_SIZE)
+        .with_context_setup(texturecraft_ui_egui::framework::install_headless)
+        .build_eframe(|cc| TextureCraftApp::new(cc, session));
     harness.state_mut().ui.prefs.language = "en".into();
     harness.run_steps(STARTUP_FRAMES);
     harness
@@ -52,7 +55,7 @@ fn button_left_of_rail<'h>(harness: &'h Harness<'_, TextureCraftApp>, label: &st
 }
 
 fn is_floating(harness: &Harness<'_, TextureCraftApp>, panel: Panel) -> bool {
-    harness.state().ui.dock.workspace().layout.floating.iter().any(|window| window.contains(&panel))
+    harness.state().ui.dock.workspace().layout().floating.iter().any(|window| window.contains(&panel))
 }
 
 /// Hover the control labelled `label` until its tooltip shows, and tell whether that says it is not available yet
@@ -83,7 +86,7 @@ fn undock_floats_the_panel_dock_returns_it_to_the_rail_and_the_float_persists() 
     let saved = serde_json::to_value(&harness.state().ui).unwrap();
     let restored: UiState = serde_json::from_value(saved).unwrap();
     assert_eq!(restored.dock, harness.state().ui.dock);
-    assert!(restored.dock.workspace().layout.floating.iter().any(|window| window.contains(&Panel::History)));
+    assert!(restored.dock.workspace().layout().floating.iter().any(|window| window.contains(&Panel::History)));
 
     button_left_of_rail(&harness, "Dock").click();
     harness.run_steps(SETTLE_FRAMES);
@@ -101,10 +104,12 @@ fn the_export_panel_leads_to_export_textures_and_the_mesh_options() {
 
     assert_eq!(harness.state().ui.rail_panel, Some(Panel::Export));
     assert!(!harness.state().ui.windows.export, "the rail opens the Export panel, not a window");
-    for label in ["SEND TO", "EXPORT", "Export to image editor", "Send to compositing app", "Send to 3D staging app"] {
-        assert!(harness.query_all_by_label(label).next().is_some(), "{label}");
+    assert!(harness.query_all_by_label("EXPORT").next().is_some(), "the EXPORT caption");
+    for label in ["SEND TO", "Export to image editor", "Send to compositing app", "Send to 3D staging app"] {
+        assert!(harness.query_all_by_label(label).next().is_none(), "the dock has no {label} row");
     }
-    assert!(says_not_available(&mut harness, "Send to compositing app"));
+    assert!(harness.query_all_by_label_contains("Send to").next().is_none(), "no SEND TO text at all");
+    button_left_of_rail(&harness, "Export Mesh...");
 
     button_left_of_rail(&harness, "Export Textures...").click();
     harness.run_steps(SETTLE_FRAMES);
@@ -116,7 +121,8 @@ fn the_export_panel_leads_to_export_textures_and_the_mesh_options() {
         assert!(harness.query_by_label(label).is_some(), "{label}");
     }
     assert!(harness.query_by_label_contains("textures selected for export").is_some());
-    assert!(says_not_available(&mut harness, "Export USD asset"));
+    assert!(!says_not_available(&mut harness, "Export USD asset"));
+    assert!(says_not_available(&mut harness, "Export shader settings"));
 
     harness.get_by_label("Save settings").click();
     harness.run_steps(SETTLE_FRAMES);
@@ -182,20 +188,20 @@ const STATUS_BAR_TOP: f32 = WINDOW_SIZE.y - 22.0;
 #[test]
 fn the_log_tabs_show_one_channel_each() {
     let mut harness = app();
-    harness.state_mut().session.log.push("Saved /somewhere/project.tcraft".into());
-    harness.state_mut().session.log.push("resource stone.png: not an image".into());
+    harness.state_mut().session.log.info("Project", "Saved /somewhere/project.tcraft");
+    harness.state_mut().session.log.error("Library agent", "resource stone.png: not an image");
     click_rail(&mut harness, "Log");
 
-    assert!(harness.query_by_label("General").is_some());
-    assert!(log_lists(&harness, "Saved /somewhere/project.tcraft"));
-    assert!(!log_lists(&harness, "resource stone.png: not an image"), "asset messages wait under Assets");
+    assert!(harness.query_by_label("GENERAL").is_some());
+    assert!(log_lists(&harness, "[Project] Saved /somewhere/project.tcraft"));
+    assert!(!log_lists(&harness, "[Library agent] resource stone.png: not an image"), "asset messages wait under ASSETS");
 
-    // The Log's own Assets tab, right of the dock's Assets panel tab
-    harness.get_all_by_label("Assets").max_by(|a, b| a.rect().left().total_cmp(&b.rect().left())).unwrap().click();
+    // The Log's own ASSETS tab
+    harness.get_by_label("ASSETS").click();
     harness.run_steps(SETTLE_FRAMES);
 
-    assert!(log_lists(&harness, "resource stone.png: not an image"));
-    assert!(!log_lists(&harness, "Saved /somewhere/project.tcraft"));
+    assert!(log_lists(&harness, "[Library agent] resource stone.png: not an image"));
+    assert!(!log_lists(&harness, "[Project] Saved /somewhere/project.tcraft"));
 }
 
 #[test]
@@ -215,7 +221,7 @@ fn display_settings_show_the_reference_rows() {
         "Environment Blur",
         "Environment Rotation",
         "Environment Alignment",
-        "Shadows",
+        "Cast shadows",
         "Computation mode",
         "Shadows opacity",
         "CAMERA SETTINGS",
@@ -307,12 +313,12 @@ fn scrolling_highlights_the_section_tab_and_a_tab_jumps_to_its_section() {
 
     assert!(tab(&harness, "Environment settings"), "the first section is highlighted at the top");
 
-    harness.get_by_role_and_label(Role::Button, "Viewer settings").click();
+    harness.get_by_role_and_label(Role::Button, "Visualization settings").click();
     harness.run_steps(SETTLE_FRAMES);
 
-    assert!(tab(&harness, "Viewer settings") && !tab(&harness, "Environment settings"), "the clicked tab is highlighted");
-    let heading = harness.get_by_label("VIEWER SETTINGS").rect();
-    assert!(harness.ctx.content_rect().contains_rect(heading), "the page scrolled to Viewer settings");
+    assert!(tab(&harness, "Visualization settings") && !tab(&harness, "Environment settings"), "the clicked tab is highlighted");
+    let heading = harness.get_by_label("VISUALIZATION SETTINGS").rect();
+    assert!(harness.ctx.content_rect().contains_rect(heading), "the page scrolled to Visualization settings");
 
     // Scroll back up a little: the Camera or Post effects heading is the one passed last
     let over_page = heading.center();
@@ -330,5 +336,5 @@ fn scrolling_highlights_the_section_tab_and_a_tab_jumps_to_its_section() {
     harness.run_steps(12);
 
     assert!(tab(&harness, "Environment settings"), "back at the top, Environment settings is highlighted again");
-    assert!(!tab(&harness, "Viewer settings"));
+    assert!(!tab(&harness, "Visualization settings"));
 }

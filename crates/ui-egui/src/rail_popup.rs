@@ -56,11 +56,6 @@ fn icons_id() -> Id {
     Id::unique("rail_popup_icons")
 }
 
-/// The panel whose popup title a drag left, and the title's rect, until the dock takes the drag over
-fn pending_drag_id() -> Id {
-    Id::unique("rail_popup_pending_drag")
-}
-
 /// Where the dock drew the viewport on this frame
 fn viewport_id() -> Id {
     Id::unique("rail_popup_viewport")
@@ -114,16 +109,6 @@ pub(crate) fn open(app: &mut TextureCraftApp, panel: Panel) {
     }
 }
 
-/// Hand a drag that left the popup's title to the dock, once the dock has drawn the panel it floated
-pub(crate) fn hand_drag_to_dock(ctx: &egui::Context, dock_area: Id) {
-    let Some((panel, title)) = ctx.data(|data| data.get_temp::<(Panel, Rect)>(pending_drag_id())) else { return };
-
-    ctx.data_mut(|data| data.remove::<(Panel, Rect)>(pending_drag_id()));
-    if ctx.input(|input| input.pointer.primary_down()) {
-        craft_ui::docking::begin_drag(ctx, dock_area, panel, title);
-    }
-}
-
 /// A rail popup and its dismissing press cannot start a paint stroke or move a decal
 pub(crate) fn blocks_paint_input(app: &TextureCraftApp, ctx: &egui::Context) -> bool {
     let closing_id = area_id().with("closing");
@@ -161,7 +146,9 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
     };
 
     let shown = ctx.memory(|memory| memory.area_rect(area_id()));
-    if closed_by_input(ctx, shown, strip) {
+
+    // An eyedropper pick's click on the model hands its colour back to the popup
+    if app.picking_color.is_none() && closed_by_input(ctx, shown, strip) {
         app.ui.rail_panel = None;
         let held = ctx.input(|input| input.pointer.any_down());
         ctx.data_mut(|data| data.insert_temp(area_id().with("closing"), held));
@@ -194,20 +181,24 @@ pub(crate) fn show(app: &mut TextureCraftApp, ctx: &egui::Context) {
         // The floating window opens where the popup was, at its size
         app.ui.rail_panel = None;
         if let Some(rect) = shown {
-            app.ui.dock.float_at(panel, [rect.left(), rect.top(), rect.width(), rect.height()]);
+            app.ui.dock.float_at(panel, rect);
         }
     } else if let Some(title) = dragged_from {
+        // The floating window opens where the popup was
         app.ui.rail_panel = None;
-        let rect = shown.unwrap_or(title);
-        app.ui.dock.float_at(panel, [rect.left(), rect.top(), rect.width(), rect.height()]);
-        ctx.data_mut(|data| data.insert_temp(pending_drag_id(), (panel, title)));
+        let window = shown.unwrap_or(title);
+        app.ui.dock.float_at(panel, window);
+        // The window takes over the held press in the next pass, so the drag carries on and docks where it is released
+        if let Some(pointer) = ctx.input(|input| input.pointer.latest_pos()) {
+            app.docks.hand_over(panel, pointer - window.min);
+        }
     }
 }
 
 /// The popup's top-corner pivot beside the rail and level with its icon, its position, and its width.
 fn placement(ctx: &egui::Context, strip: Rect, icon: Rect) -> (egui::Align2, Pos2, f32) {
     let viewport = ctx.data(|data| data.get_temp::<Rect>(viewport_id()));
-    if craft_ui::direction::is_rtl(ctx) {
+    if ctx.global_style().right_to_left {
         let left = strip.right() + RAIL_GAP;
         let width = viewport.map_or(POPUP_MIN_WIDTH, |viewport| (viewport.left() + VIEWPORT_OVERHANG) - left).max(POPUP_MIN_WIDTH);
         (egui::Align2::LEFT_TOP, Pos2::new(left, icon.top()), width)
@@ -218,12 +209,13 @@ fn placement(ctx: &egui::Context, strip: Rect, icon: Rect) -> (egui::Align2, Pos
     }
 }
 
-/// A press outside the popup and the rail, unless in one of the popup's own dropdowns
+/// A press outside the popup and the rail, unless in one of the popup's own dropdowns or its colour picker window
 fn closed_by_input(ctx: &egui::Context, shown: Option<Rect>, strip: Rect) -> bool {
     let pressed_at = ctx.input(|input| input.pointer.press_origin().filter(|_| input.pointer.any_pressed()));
 
-    // A press on the rail is left to its icons, which switch or close the popup themselves
-    let outside = pressed_at.is_some_and(|at| !strip.contains(at) && shown.is_some_and(|rect| !rect.contains(at)));
+    // The rail icons and colour picker handle their own presses
+    let in_picker = |at: Pos2| crate::color_picker::open_window(ctx).is_some_and(|picker| picker.contains(at));
+    let outside = pressed_at.is_some_and(|at| !strip.contains(at) && shown.is_some_and(|rect| !rect.contains(at)) && !in_picker(at));
     outside && !egui::Popup::is_any_open(ctx)
 }
 
@@ -244,7 +236,9 @@ fn body(app: &mut TextureCraftApp, ui: &mut Ui, panel: Panel, available_height: 
 
 /// The panel's name in capitals, which drags like a tab, then Undock and Close: whether each was clicked, and where a drag started
 fn title_row(ui: &mut Ui, tokens: &Tokens, panel: Panel) -> (bool, bool, Option<Rect>) {
-    let row = craft_ui::direction::horizontal(ui, |ui| {
+    let rtl = ui.style().right_to_left;
+    let layout = if rtl { egui::Layout::right_to_left(egui::Align::Center) } else { egui::Layout::left_to_right(egui::Align::Center) };
+    let row = ui.with_layout(layout, |ui| {
         ui.label(RichText::new(tr(panel.name()).to_uppercase()).strong().color(tokens.text_strong));
         ui.add_space((ui.available_width() - 2.0 * TITLE_BUTTON_SIZE - TITLE_BUTTON_GAP).max(0.0));
         let undock = icon_button(ui, ic::ARROW_SQUARE_OUT, tr("Undock"), false, TITLE_BUTTON_SIZE);
@@ -254,7 +248,7 @@ fn title_row(ui: &mut Ui, tokens: &Tokens, panel: Panel) -> (bool, bool, Option<
     });
 
     let (row, (undock, close)) = (row.response.rect, row.inner);
-    let title = if craft_ui::direction::is_rtl(ui) {
+    let title = if rtl {
         Rect::from_min_max(egui::pos2(undock.rect.right(), row.top()), row.max)
     } else {
         Rect::from_min_max(row.min, egui::pos2(undock.rect.left(), row.bottom()))
