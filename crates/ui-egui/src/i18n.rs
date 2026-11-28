@@ -426,8 +426,9 @@ mod tests",
         ] {
             assert_eq!(language_for_locale(locale), code, "{locale}");
         }
+        // Hebrew is always listed, but the interface only switches when its catalog is embedded
         set_language("he");
-        assert!(matches!(current().code, "he" | "en"));
+        assert_eq!(current().code, if available("he") { "he" } else { "en" });
         set_language("de");
         assert_eq!(current().code, if available("de") { "de" } else { "en" });
         assert_eq!(tr("not a key"), "not a key");
